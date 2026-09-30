@@ -78,7 +78,7 @@ def client(monkeypatch, tmp_path):
 def test_plugin_installs_middleware(monkeypatch, tmp_path):
     app = _build_app(monkeypatch, tmp_path)
     names = [m.cls.__name__ for m in app.user_middleware]
-    assert names == ['RequireIdentityMiddleware']
+    assert names == ['RefuseCrossSiteMiddleware', 'RequireIdentityMiddleware']
     assert len(plugins.get_plugins()) == 1
 
 
@@ -182,3 +182,115 @@ def test_websocket_with_other_bearer_token_is_refused(client):
                                       headers={'Authorization': 'Bearer abc'}):
             pass
     assert exc_info.value.code == 4401
+
+
+# Cross-site refusal. Every request below carries an identity so that only
+# the cross-site rule decides.
+
+IDENTITY = {HEADER: 'alice@example.com'}
+OWN = 'testserver'
+
+
+def test_same_origin_fetch_passes(client):
+    response = client.get('/users/role',
+                          headers={
+                              **IDENTITY, 'Sec-Fetch-Site': 'same-origin'
+                          })
+    assert response.status_code == 200
+
+
+def test_navigation_passes(client):
+    response = client.get('/users/role',
+                          headers={
+                              **IDENTITY, 'Sec-Fetch-Site': 'none'
+                          })
+    assert response.status_code == 200
+
+
+def test_cross_site_fetch_is_refused(client):
+    response = client.get('/users/role',
+                          headers={
+                              **IDENTITY, 'Sec-Fetch-Site': 'cross-site'
+                          })
+    assert response.status_code == 403
+    assert response.json() == {'detail': 'Cross-site request refused'}
+    assert 'access-control-allow-origin' not in response.headers
+
+
+def test_same_site_fetch_is_refused(client):
+    response = client.get('/users/role',
+                          headers={
+                              **IDENTITY, 'Sec-Fetch-Site': 'same-site'
+                          })
+    assert response.status_code == 403
+
+
+def test_own_origin_passes(client):
+    response = client.post('/users/role',
+                           headers={
+                               **IDENTITY, 'Origin': f'http://{OWN}'
+                           })
+    # 405: the route only takes GET, so the request reached the app.
+    assert response.status_code == 405
+
+
+def test_own_origin_via_forwarded_host_passes(client):
+    response = client.get('/users/role',
+                          headers={
+                              **IDENTITY, 'Origin': 'https://sky.example.net',
+                              'X-Forwarded-Host': 'sky.example.net'
+                          })
+    assert response.status_code == 200
+
+
+def test_foreign_origin_is_refused(client):
+    response = client.post('/workspaces/config',
+                           headers={
+                               **IDENTITY, 'Origin': 'https://evil.example'
+                           })
+    assert response.status_code == 403
+
+
+def test_null_origin_is_refused(client):
+    response = client.get('/users/role',
+                          headers={
+                              **IDENTITY, 'Origin': 'null'
+                          })
+    assert response.status_code == 403
+
+
+def test_foreign_preflight_is_refused_without_cors_headers(client):
+    response = client.options('/workspaces/config',
+                              headers={
+                                  'Origin': 'https://evil.example',
+                                  'Access-Control-Request-Method': 'POST',
+                                  'Access-Control-Request-Headers':
+                                  'content-type',
+                              })
+    assert response.status_code == 403
+    assert 'access-control-allow-origin' not in response.headers
+    assert 'access-control-allow-methods' not in response.headers
+
+
+def test_cli_style_request_without_browser_headers_passes(client):
+    response = client.get('/users/role', headers=IDENTITY)
+    assert response.status_code == 200
+
+
+def test_websocket_from_foreign_origin_is_refused(client):
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        with client.websocket_connect('/kubernetes-pod-ssh-proxy',
+                                      headers={
+                                          **IDENTITY, 'Origin':
+                                          'https://evil.example'
+                                      }):
+            pass
+    assert exc_info.value.code == 4403
+
+
+def test_websocket_from_own_origin_is_accepted(client):
+    with client.websocket_connect('/kubernetes-pod-ssh-proxy',
+                                  headers={
+                                      **IDENTITY, 'Origin': f'http://{OWN}'
+                                  }) as ws:
+        assert ws.receive_text() == 'accepted'

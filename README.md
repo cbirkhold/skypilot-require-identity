@@ -1,6 +1,7 @@
 # skypilot-require-identity
 
-A SkyPilot API server plugin that refuses requests carrying no identity.
+A SkyPilot API server plugin that refuses requests carrying no identity, and
+browser requests from other sites.
 
 ## Why
 
@@ -19,11 +20,14 @@ control. Defense in depth.
 
 ## How
 
-The plugin adds a middleware to the API server. Plugins install after the core
-middleware stack, so it is the outermost middleware and runs before SkyPilot's
-authentication middleware. It cannot read `request.state.auth_user` and checks
-the request itself instead. A request passes when at least one of the following
-is true:
+The plugin adds two middlewares to the API server. Plugins install after the
+core middleware stack, so they are the outermost middlewares and run before
+SkyPilot's authentication middleware. They cannot read
+`request.state.auth_user` and check the request itself instead.
+
+### Requests with no identity
+
+A request passes when at least one of the following is true:
 
 1. it carries a non-empty value in the configured identity header
    (`auth.external_proxy.header_name`), which the proxy sets from the caller's
@@ -43,7 +47,33 @@ uvicorn reports the refusal as HTTP 403 on the handshake.
 The plugin refuses to install, and the server does not start, when the external
 auth proxy is disabled, since the identity header then has no meaning.
 
-Two assumptions must hold for the checks to work:
+### Cross-site browser requests
+
+The server answers any `Origin` with `Access-Control-Allow-Origin` set to that
+origin, credentials allowed and every method permitted. Behind a proxy that
+takes identity from the network path, a browser on that network carries the
+identity on every request it makes, whichever page made it. So any web page a
+person opens can call the API as that person and read the answer, including the
+workspace config an admin can read, and change anything they can change.
+
+A second middleware refuses such requests. It refuses a request when:
+
+1. it carries `Sec-Fetch-Site` with any value but `same-origin` or `none`
+   (a navigation the person started). Browsers set this header on every
+   request and page script cannot change it;
+2. it carries an `Origin` naming a host other than the server's own, taken
+   from `X-Forwarded-Host` or `Host`. Browsers send `Origin` on every
+   state-changing request, every cross-origin request and every websocket
+   handshake. `Origin: null` counts as foreign.
+
+A request with neither header, which is what the `sky` CLI and other
+non-browser clients send, is not affected. The dashboard is served from the
+server's own origin and passes. A refused request gets HTTP 403
+`{"detail": "Cross-site request refused"}`, and a refused preflight gets no
+`Access-Control-Allow-*` headers, so the browser blocks the real request. A
+websocket handshake is refused with close code 4403.
+
+Two assumptions must hold for the identity check to work:
 
 - the proxy strips identity headers a caller sends, and it is the only network
   path to the server. Enforce the second with a network policy;
@@ -69,14 +99,14 @@ serve controllers.
 
 ### Pin what you install
 
-Each release carries a wheel and its SHA-256 in `SHA256SUMS`. Install it
-through a requirements file in pip's hash-checking mode, which refuses the
-file if a single byte differs, so a moved tag or a replaced asset fails the
-install instead of running:
+Each release carries a wheel and its SHA-256 in `SHA256SUMS`. Install it through
+a requirements file in pip's hash-checking mode, which refuses the file if a
+single byte differs, so a moved tag or a replaced asset fails the install
+instead of running:
 
 ```
 # requirements.txt
-skypilot-require-identity @ https://github.com/cbirkhold/skypilot-require-identity/releases/download/v0.1.0/skypilot_require_identity-0.1.0-py3-none-any.whl \
+skypilot-require-identity @ https://github.com/cbirkhold/skypilot-require-identity/releases/download/v0.2.0/skypilot_require_identity-0.2.0-py3-none-any.whl \
     --hash=sha256:<digest from the release's SHA256SUMS>
 ```
 
@@ -84,15 +114,15 @@ skypilot-require-identity @ https://github.com/cbirkhold/skypilot-require-identi
 pip install --no-cache-dir --no-deps --require-hashes -r requirements.txt
 ```
 
-`--no-deps` because the package has none, and hash mode would otherwise demand
-a digest for anything pulled in. A git URL cannot be used here: pip refuses
+`--no-deps` because the package has none, and hash mode would otherwise demand a
+digest for anything pulled in. A git URL cannot be used here: pip refuses
 version control sources in hash-checking mode, and a tag can be moved.
 
 The wheel is built reproducibly, so the digest can be checked without trusting
 the release: check out the tag, build with the commit's timestamp, and compare.
 
 ```bash
-git checkout v0.1.0
+git checkout v0.2.0
 SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python -m build --wheel
 sha256sum dist/*.whl
 ```
@@ -101,17 +131,17 @@ Each wheel also has a GitHub build provenance attestation tying it to the
 workflow run that built it:
 
 ```bash
-gh attestation verify skypilot_require_identity-0.1.0-py3-none-any.whl \
+gh attestation verify skypilot_require_identity-0.2.0-py3-none-any.whl \
     --repo cbirkhold/skypilot-require-identity
 ```
 
 ### With the Helm chart, no custom image
 
-The chart runs `apiService.preDeployHook` inside the API server container
-before the server starts, which is where the package is installed. A ConfigMap
-provides the plugins config, and an environment variable points the server at
-it. The config cannot go under `/root/.sky`, because the chart mounts a
-persistent volume there.
+The chart runs `apiService.preDeployHook` inside the API server container before
+the server starts, which is where the package is installed. A ConfigMap provides
+the plugins config, and an environment variable points the server at it. The
+config cannot go under `/root/.sky`, because the chart mounts a persistent
+volume there.
 
 ```bash
 kubectl create configmap skypilot-plugins -n skypilot \
@@ -139,9 +169,9 @@ apiService:
       subPath: requirements.txt
 ```
 
-The hook runs on every pod start and needs network access to the package
-source. If the chart already sets a plugins config, merge the entry above into
-it instead of adding a second file.
+The hook runs on every pod start and needs network access to the package source.
+If the chart already sets a plugins config, merge the entry above into it
+instead of adding a second file.
 
 ### With a custom image
 
@@ -174,6 +204,15 @@ curl -si https://<api-server>/workspaces/config   # expect 401
 curl -si https://<api-server>/api/health          # expect 200
 ```
 
+From a client with an identity, as a browser on another site would send it:
+
+```bash
+curl -si -H 'Origin: https://evil.example' https://<api-server>/users/role
+# expect 403 and no Access-Control-Allow-Origin header
+curl -si -H 'Sec-Fetch-Site: cross-site' https://<api-server>/users/role
+# expect 403
+```
+
 From a client with an identity, `sky api info` and a small job must still work,
 and `sky ssh` to a Kubernetes cluster must still open its websocket.
 
@@ -189,12 +228,12 @@ The plugin uses SkyPilot's plugin API (`sky.server.plugins.BasePlugin`), the
 | 0.13.0 | Verified: unit tests and checks against the running server pass |
 | master | The four interfaces above exist; not run |
 
-"Verified" means against the `berkeleyskypilot/skypilot` image of that
-version, by the digest the test workflow pins. For 0.13.0 that is
+"Verified" means against the `berkeleyskypilot/skypilot` image of that version,
+by the digest the test workflow pins. For 0.13.0 that is
 `sha256:3bc8bf8f4d83023bae2260b15d01f7581fa2c3e225b75983d92c7f781252662d`.
 
-Versions before 0.13.0 are not supported. The package declares no dependency
-on `skypilot`, because the server image already provides it, under the name
+Versions before 0.13.0 are not supported. The package declares no dependency on
+`skypilot`, because the server image already provides it, under the name
 `skypilot` or `skypilot-nightly`, and a dependency would pull in a second copy.
 
 ## Upgrading SkyPilot
