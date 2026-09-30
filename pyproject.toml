@@ -1,0 +1,27 @@
+[build-system]
+# The release workflow pins the same version; keep the two in step.
+requires = ["setuptools>=84"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skypilot-require-identity"
+# The version is read from skypilot_require_identity.__version__, the
+# single place it is written.
+dynamic = ["version"]
+description = "SkyPilot API server plugin that refuses requests carrying no identity"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+readme = "README.md"
+# The plugin imports from the installed skypilot package; it is installed
+# into the SkyPilot server image, so skypilot is not listed as a dependency
+# to avoid pip replacing the image's own installation.
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/cbirkhold/skypilot-require-identity"
+
+[tool.setuptools.packages.find]
+include = ["skypilot_require_identity*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "skypilot_require_identity.__version__"}

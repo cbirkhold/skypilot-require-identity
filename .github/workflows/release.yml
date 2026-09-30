@@ -1,0 +1,79 @@
+name: release
+
+# Builds the wheel for a version tag, attaches it to a GitHub Release with
+# its SHA-256, and records build provenance for it. The build is
+# reproducible: anyone can check out the tag, build with the commit's
+# timestamp, and get a wheel with the same digest.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      # Create the release and upload its assets.
+      contents: write
+      # Sign the provenance attestation and store it.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Install the build tools
+        run: python -m pip install build==1.6.1 setuptools==84.0.0 wheel==0.48.0
+
+      - name: Check that the tag names the package version
+        env:
+          TAG: ${{ github.ref_name }}
+        # Read from the source rather than importing the module, which
+        # needs the SkyPilot server's packages the runner does not have.
+        run: |
+          version=$(python - <<'PY'
+          import ast, pathlib
+          tree = ast.parse(pathlib.Path('skypilot_require_identity/__init__.py').read_text())
+          print(next(node.value.value for node in tree.body
+                     if isinstance(node, ast.Assign) and node.targets[0].id == '__version__'))
+          PY
+          )
+          if [ "v${version}" != "${TAG}" ]; then
+            echo "tag ${TAG} does not match __version__ ${version}" >&2
+            exit 1
+          fi
+
+      - name: Build the wheel reproducibly
+        run: |
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) \
+            python -m build --wheel --no-isolation
+          (cd dist && sha256sum *.whl > SHA256SUMS)
+          cat dist/SHA256SUMS
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*.whl
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          {
+            echo 'Install with `pip install --require-hashes` using the digest below.'
+            echo 'The wheel is reproducible from this tag; see README.md.'
+            echo
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+          } > notes.md
+          gh release create "${TAG}" dist/*.whl dist/SHA256SUMS \
+            --title "${TAG}" --notes-file notes.md

@@ -1,0 +1,2 @@
+plugins:
+  - class: skypilot_require_identity.RequireIdentityPlugin

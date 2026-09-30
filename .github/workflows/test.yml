@@ -1,0 +1,26 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The stock SkyPilot server images the plugin is verified against,
+        # pinned to the image index digest so a re-pushed tag cannot
+        # change what the tests ran on. Look one up with
+        # `docker buildx imagetools inspect <image>:<tag>`.
+        image:
+          - berkeleyskypilot/skypilot:0.13.0@sha256:3bc8bf8f4d83023bae2260b15d01f7581fa2c3e225b75983d92c7f781252662d
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run the tests inside the SkyPilot server image
+        run: |
+          docker run --rm -v "$PWD:/plugin:ro" ${{ matrix.image }} bash -c \
+            'pip install -q pytest && cd /plugin && PYTHONPATH=/plugin python -m pytest -q -p no:cacheprovider tests'
