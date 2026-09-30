@@ -59,15 +59,22 @@ workspace config an admin can read, and change anything they can change.
 A second middleware refuses such requests. It refuses a request when:
 
 1. it carries `Sec-Fetch-Site` with any value but `same-origin` or `none`
-   (a navigation the person started). Browsers set this header on every
-   request and page script cannot change it;
+   (a navigation the person started), unless it is a top-level page load: a
+   GET with `Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`. That
+   is how an OAuth provider returns the browser and how a link opens the
+   dashboard; it cannot carry a body or custom headers, and the page that
+   triggered it cannot read the response. Frames and embeds are not
+   included. Browsers set these headers on every request and page script
+   cannot change them;
 2. it carries an `Origin` naming a host other than the server's own, taken
    from `X-Forwarded-Host` or `Host`. Browsers send `Origin` on every
    state-changing request, every cross-origin request and every websocket
    handshake. `Origin: null` counts as foreign.
 
-A request with neither header, which is what the `sky` CLI and other
-non-browser clients send, is not affected. The dashboard is served from the
+The page-load allowance assumes GET endpoints do not change state, which
+holds for SkyPilot: every mutation is a POST. A request with neither header,
+which is what the `sky` CLI and other non-browser clients send, is not
+affected. The dashboard is served from the
 server's own origin and passes. A refused request gets HTTP 403
 `{"detail": "Cross-site request refused"}`, and a refused preflight gets no
 `Access-Control-Allow-*` headers, so the browser blocks the real request. A
@@ -106,7 +113,7 @@ instead of running:
 
 ```
 # requirements.txt
-skypilot-require-identity @ https://github.com/cbirkhold/skypilot-require-identity/releases/download/v0.2.0/skypilot_require_identity-0.2.0-py3-none-any.whl \
+skypilot-require-identity @ https://github.com/cbirkhold/skypilot-require-identity/releases/download/v0.3.0/skypilot_require_identity-0.3.0-py3-none-any.whl \
     --hash=sha256:<digest from the release's SHA256SUMS>
 ```
 
@@ -122,7 +129,7 @@ The wheel is built reproducibly, so the digest can be checked without trusting
 the release: check out the tag, build with the commit's timestamp, and compare.
 
 ```bash
-git checkout v0.2.0
+git checkout v0.3.0
 SOURCE_DATE_EPOCH=$(git log -1 --format=%ct) python -m build --wheel
 sha256sum dist/*.whl
 ```
@@ -131,7 +138,7 @@ Each wheel also has a GitHub build provenance attestation tying it to the
 workflow run that built it:
 
 ```bash
-gh attestation verify skypilot_require_identity-0.2.0-py3-none-any.whl \
+gh attestation verify skypilot_require_identity-0.3.0-py3-none-any.whl \
     --repo cbirkhold/skypilot-require-identity
 ```
 

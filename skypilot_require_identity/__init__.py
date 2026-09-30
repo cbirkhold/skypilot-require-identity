@@ -11,7 +11,9 @@ It installs a second middleware that refuses cross-site browser requests with
 HTTP 403, or close code 4403. Behind a proxy that identifies the caller from
 the network path, a browser carries that identity on every request, and the
 server otherwise accepts any origin, so any web page could act as the person
-viewing it.
+viewing it. A top-level page load from another site is allowed, since that is
+how an OAuth provider returns the browser and how a link opens the dashboard,
+and it can neither carry a body nor read the response.
 
 See README.md for the full rules, the assumptions they rely on, and how to
 install and verify the plugin.
@@ -30,7 +32,7 @@ import starlette.middleware.base
 
 logger = sky_logging.init_logger(__name__)
 
-__version__ = '0.2.0'
+__version__ = '0.3.0'
 
 _HEALTH_PATH = '/api/health'
 _SERVICE_ACCOUNT_TOKEN_PREFIX = 'sky_'
@@ -78,6 +80,20 @@ class RequireIdentityMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 _ALLOWED_FETCH_SITES = ('same-origin', 'none')
 
 
+def _is_top_level_navigation(request: fastapi.Request) -> bool:
+    """Whether the request is a top-level page load.
+
+    A GET navigation whose destination is the document itself is what a link
+    or an OAuth redirect produces. It cannot carry a body or custom headers,
+    and the page that triggered it cannot read the response, so it is as safe
+    as the person typing the URL. Frames and embeds are not included, so
+    another site cannot embed the dashboard.
+    """
+    return (request.method == 'GET' and
+            request.headers.get('sec-fetch-mode') == 'navigate' and
+            request.headers.get('sec-fetch-dest') == 'document')
+
+
 def _own_hosts(request: fastapi.Request) -> set:
     """The host names the server is reached under, with and without port."""
     hosts = set()
@@ -114,7 +130,9 @@ class RefuseCrossSiteMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
 
     async def dispatch(self, request: fastapi.Request, call_next):
         fetch_site = request.headers.get('sec-fetch-site')
-        if fetch_site is not None and fetch_site not in _ALLOWED_FETCH_SITES:
+        if (fetch_site is not None and
+                fetch_site not in _ALLOWED_FETCH_SITES and
+                not _is_top_level_navigation(request)):
             return _cross_site_response()
         if _is_foreign_origin(request):
             return _cross_site_response()

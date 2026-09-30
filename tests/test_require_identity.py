@@ -291,3 +291,81 @@ def test_websocket_from_own_origin_is_accepted(client):
                                       **IDENTITY, 'Origin': f'http://{OWN}'
                                   }) as ws:
         assert ws.receive_text() == 'accepted'
+
+
+# Top-level navigations from another site pass; everything else cross-site
+# stays refused.
+
+NAVIGATE = {'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document'}
+
+
+def test_cross_site_navigation_passes(client):
+    response = client.get('/users/role',
+                          headers={
+                              **IDENTITY, 'Sec-Fetch-Site': 'cross-site',
+                              **NAVIGATE
+                          })
+    assert response.status_code == 200
+
+
+def test_same_site_navigation_passes(client):
+    response = client.get('/users/role',
+                          headers={
+                              **IDENTITY, 'Sec-Fetch-Site': 'same-site',
+                              **NAVIGATE
+                          })
+    assert response.status_code == 200
+
+
+def test_cross_site_frame_is_refused(client):
+    response = client.get('/dashboard/',
+                          headers={
+                              **IDENTITY, 'Sec-Fetch-Site': 'cross-site',
+                              'Sec-Fetch-Mode': 'navigate',
+                              'Sec-Fetch-Dest': 'iframe'
+                          })
+    assert response.status_code == 403
+
+
+def test_cross_site_post_navigation_is_refused(client):
+    # A form submission from another site. Browsers also send Origin on it,
+    # so both rules refuse it; this checks the fetch-metadata rule alone.
+    response = client.post('/workspaces/config',
+                           headers={
+                               **IDENTITY, 'Sec-Fetch-Site': 'cross-site',
+                               **NAVIGATE
+                           })
+    assert response.status_code == 403
+
+
+def test_cross_site_post_navigation_with_origin_is_refused(client):
+    response = client.post('/workspaces/config',
+                           headers={
+                               **IDENTITY, 'Sec-Fetch-Site': 'cross-site',
+                               'Origin': 'https://evil.example',
+                               **NAVIGATE
+                           })
+    assert response.status_code == 403
+
+
+def test_same_site_fetch_is_still_refused(client):
+    response = client.get('/users/role',
+                          headers={
+                              **IDENTITY, 'Sec-Fetch-Site': 'same-site',
+                              'Sec-Fetch-Mode': 'cors',
+                              'Sec-Fetch-Dest': 'empty'
+                          })
+    assert response.status_code == 403
+
+
+def test_cross_site_websocket_is_refused(client):
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        with client.websocket_connect(
+                '/kubernetes-pod-ssh-proxy',
+                headers={
+                    **IDENTITY, 'Sec-Fetch-Site': 'cross-site',
+                    'Sec-Fetch-Mode': 'websocket',
+                    'Sec-Fetch-Dest': 'websocket'
+                }):
+            pass
+    assert exc_info.value.code == 4403
