@@ -25,3 +25,22 @@ include = ["skypilot_require_identity*"]
 
 [tool.setuptools.dynamic]
 version = {attr = "skypilot_require_identity.__version__"}
+
+# Formatter and linter settings, the same as SkyPilot's.
+[tool.yapf]
+based_on_style = "google"
+allow_split_before_dict_value = false
+
+[tool.isort]
+profile = "google"
+line_length = 80
+multi_line_output = 0
+combine_as_imports = true
+use_parentheses = true
+
+[tool.mypy]
+python_version = "3.10"
+follow_imports = "skip"
+ignore_missing_imports = true
+allow_redefinition = true
+check_untyped_defs = true

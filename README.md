@@ -216,6 +216,23 @@ curl -si -H 'Sec-Fetch-Site: cross-site' https://<api-server>/users/role
 From a client with an identity, `sky api info` and a small job must still work,
 and `sky ssh` to a Kubernetes cluster must still open its websocket.
 
+## Developing
+
+The formatter and linters are the ones SkyPilot pins, so the plugin stays in
+the style of the code it extends. Set them up once in a project environment:
+
+```bash
+uv venv --python 3.11
+uv pip install -r requirements-dev.txt
+uv run bash format.sh
+```
+
+`format.sh` formats in place and then lints; `format.sh --check` fails on any
+needed change and is what the `lint` workflow runs. Python 3.11, not newer:
+the pinned yapf needs `lib2to3`, which 3.13 removed. The linters do not need
+SkyPilot installed; the tests do, which is why they run inside the server
+image (see Verify).
+
 ## Supported SkyPilot versions
 
 The plugin uses SkyPilot's plugin API (`sky.server.plugins.BasePlugin`), the

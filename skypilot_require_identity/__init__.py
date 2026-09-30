@@ -21,13 +21,12 @@ from typing import Optional
 import urllib.parse
 
 import fastapi
-import starlette.middleware.base
-
 from sky import sky_logging
 from sky.server import config as server_config
 from sky.server import middleware_utils
 from sky.server import plugins
 from sky.server.auth import loopback
+import starlette.middleware.base
 
 logger = sky_logging.init_logger(__name__)
 
@@ -42,8 +41,8 @@ def _has_service_account_token(request: fastapi.Request) -> bool:
     if not auth_header:
         return False
     scheme, _, token = auth_header.partition(' ')
-    return (scheme.lower() == 'bearer'
-            and token.startswith(_SERVICE_ACCOUNT_TOKEN_PREFIX))
+    return (scheme.lower() == 'bearer' and
+            token.startswith(_SERVICE_ACCOUNT_TOKEN_PREFIX))
 
 
 @middleware_utils.websocket_aware

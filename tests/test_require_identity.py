@@ -9,12 +9,12 @@ HTTP and websocket handshake paths end to end.
 import fastapi
 from fastapi.testclient import TestClient
 import pytest
-import skypilot_require_identity  # pylint: disable=unused-import
+from sky.server import config as server_config
+from sky.server import plugins
 from starlette.websockets import WebSocketDisconnect
 import yaml
 
-from sky.server import config as server_config
-from sky.server import plugins
+import skypilot_require_identity  # pylint: disable=unused-import
 
 HEADER = 'Tailscale-User-Login'
 
@@ -252,21 +252,18 @@ def test_foreign_origin_is_refused(client):
 
 
 def test_null_origin_is_refused(client):
-    response = client.get('/users/role',
-                          headers={
-                              **IDENTITY, 'Origin': 'null'
-                          })
+    response = client.get('/users/role', headers={**IDENTITY, 'Origin': 'null'})
     assert response.status_code == 403
 
 
 def test_foreign_preflight_is_refused_without_cors_headers(client):
-    response = client.options('/workspaces/config',
-                              headers={
-                                  'Origin': 'https://evil.example',
-                                  'Access-Control-Request-Method': 'POST',
-                                  'Access-Control-Request-Headers':
-                                  'content-type',
-                              })
+    response = client.options(
+        '/workspaces/config',
+        headers={
+            'Origin': 'https://evil.example',
+            'Access-Control-Request-Method': 'POST',
+            'Access-Control-Request-Headers': 'content-type',
+        })
     assert response.status_code == 403
     assert 'access-control-allow-origin' not in response.headers
     assert 'access-control-allow-methods' not in response.headers
@@ -279,11 +276,11 @@ def test_cli_style_request_without_browser_headers_passes(client):
 
 def test_websocket_from_foreign_origin_is_refused(client):
     with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect('/kubernetes-pod-ssh-proxy',
-                                      headers={
-                                          **IDENTITY, 'Origin':
-                                          'https://evil.example'
-                                      }):
+        with client.websocket_connect(
+                '/kubernetes-pod-ssh-proxy',
+                headers={
+                    **IDENTITY, 'Origin': 'https://evil.example'
+                }):
             pass
     assert exc_info.value.code == 4403
 
