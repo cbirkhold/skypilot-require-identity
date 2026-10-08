@@ -1,4 +1,9 @@
-# skypilot-require-identity
+<p align="left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/logo-dark.svg">
+    <img alt="skypilot-require-identity" src="assets/logo/logo-light.svg" height="48">
+  </picture>
+</p>
 
 A SkyPilot API server plugin that refuses requests carrying no identity, and
 browser requests from other sites.
